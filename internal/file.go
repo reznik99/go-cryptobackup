@@ -1,4 +1,4 @@
-package main
+package internal
 
 import (
 	"fmt"
@@ -99,7 +99,7 @@ func Copy(srcFile, dstFile string, encKey []byte, macKey []byte) error {
 	}
 	log.WithFields(log.Fields{
 		"name": inStats.Name(),
-		"size": formatter.Sprint(ByteCountBinary(inStats.Size())),
+		"size": Formatter.Sprint(ByteCountBinary(inStats.Size())),
 	}).Info("- Copied file")
 
 	return nil

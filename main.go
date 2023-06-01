@@ -9,14 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/reznik99/go-cryptobackup/internal"
 	log "github.com/sirupsen/logrus"
 
 	"golang.org/x/crypto/pbkdf2"
-	"golang.org/x/text/language"
-	"golang.org/x/text/message"
 )
-
-var formatter = message.NewPrinter(language.English)
 
 type Config struct {
 	Directories []string `json:"directories"`
@@ -52,19 +49,6 @@ func ParseFlags() (string, string) {
 	return *configPath, *passphrase
 }
 
-func ByteCountBinary(b int64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
-}
-
 func main() {
 	log.SetFormatter(&log.TextFormatter{})
 	log.SetOutput(os.Stdout)
@@ -86,7 +70,7 @@ func main() {
 	}
 
 	var backupDir = fmt.Sprintf("%s/backup-%s", homeDir, time.Now().Format("2006-01-02T15:04:05-0700"))
-	err = CreateIfNotExists(backupDir, 0755)
+	err = internal.CreateIfNotExists(backupDir, 0755)
 	if err != nil {
 		log.Fatalf("Unable to create general backup directory: %s", err)
 	}
@@ -97,12 +81,12 @@ func main() {
 	for _, dir := range config.Directories {
 		tokens := strings.Split(dir, "/")
 		targetDir := fmt.Sprintf("%s/%s", backupDir, tokens[len(tokens)-1])
-		err = CreateIfNotExists(targetDir, 0755)
+		err = internal.CreateIfNotExists(targetDir, 0755)
 		if err != nil {
 			log.Errorf("Unable to create backup directory: %s", err)
 			continue
 		}
-		read, err := CopyDirectory(dir, targetDir, encKey, encKey)
+		read, err := internal.CopyDirectory(dir, targetDir, encKey, encKey)
 		if err != nil {
 			log.Errorf("Failed to backup %s: %s", dir, err)
 			continue
@@ -110,12 +94,14 @@ func main() {
 		bytesRead += read
 	}
 
+	// TODO: Save metadata to an backup.info file to allow decryption/restore
+
 	// Log stats
 	log.Info("Backup completed")
-	var formattedRead = ByteCountBinary(bytesRead)
+	var formattedRead = internal.ByteCountBinary(bytesRead)
 	log.WithFields(log.Fields{
-		"Read":  formatter.Sprint(formattedRead),
-		"Speed": formatter.Sprintf("%s/s", ByteCountBinary((bytesRead/time.Since(start).Milliseconds())*1000)),
-		"Time":  formatter.Sprint(time.Since(start).Truncate(time.Millisecond * 10)),
+		"Read":  internal.Formatter.Sprint(formattedRead),
+		"Speed": internal.Formatter.Sprintf("%s/s", internal.ByteCountBinary((bytesRead/time.Since(start).Milliseconds())*1000)),
+		"Time":  internal.Formatter.Sprint(time.Since(start).Truncate(time.Millisecond * 10)),
 	}).Info("Backup Statistics: ")
 }
