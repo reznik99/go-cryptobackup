@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,8 +10,6 @@ import (
 
 	"github.com/reznik99/go-cryptobackup/internal"
 	log "github.com/sirupsen/logrus"
-
-	"golang.org/x/crypto/pbkdf2"
 )
 
 type Config struct {
@@ -30,14 +27,14 @@ func ParseConfig(configPath string) Config {
 	if err != nil {
 		log.Fatalf("Unable to parse config: %s", err)
 	}
-	log.Println("Parsed config...")
 
 	return config
 }
 
-func ParseFlags() (string, string) {
-	var configPath = flag.String("config", "", "Absolute path to config file for backup/restore instructions")
-	var passphrase = flag.String("passphrase", "", "Passphrase to encrypt backups")
+func ParseFlags() (string, string, bool) {
+	var configPath = flag.String("conf", "", "Absolute path to config file for backup/restore instructions")
+	var passphrase = flag.String("pass", "", "Passphrase to encrypt backups")
+	var verbose = flag.Bool("v", false, "Passphrase to encrypt backups")
 	flag.Parse()
 
 	if *configPath == "" || *passphrase == "" {
@@ -45,39 +42,48 @@ func ParseFlags() (string, string) {
 		os.Exit(1)
 	}
 
-	log.Println("Parsed flags...")
-	return *configPath, *passphrase
+	return *configPath, *passphrase, *verbose
 }
 
 func main() {
+	// Init logger
 	log.SetFormatter(&log.TextFormatter{})
 	log.SetOutput(os.Stdout)
 
 	// Parse Flags and Configuration
-	var configPath, passphrase = ParseFlags()
+	log.Println("Parsing CLI flags...")
+	var configPath, passphrase, verbose = ParseFlags()
+	log.Println("Parsing config...")
 	var config = ParseConfig(configPath)
 
-	// Parse passphrase (if any) and generate encryption keys
-	// TODO: Temporary IV
-	// TODO: Temporary enc and mac keys are same
-	var iv = []byte{0x52, 0x84, 0xf3, 0x22, 0x01, 0xff, 0x4f, 0x4a}
-	encKey := pbkdf2.Key([]byte(passphrase), iv, 4096, 32, sha256.New)
-
-	// Iterate over directories and backup/encrypt
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatalf("Unable to get user home directory: %s", err)
+	if verbose {
+		log.SetLevel(log.DebugLevel)
+		log.Debug("Verbose logging enbabled...")
 	}
 
-	var backupDir = fmt.Sprintf("%s/backup-%s", homeDir, time.Now().Format("2006-01-02T15:04:05-0700"))
-	err = internal.CreateIfNotExists(backupDir, 0755)
+	// Derive encryption keys
+	log.Println("Deriving encryption keys...")
+	encKey, err := internal.DeriveKey(passphrase)
 	if err != nil {
-		log.Fatalf("Unable to create general backup directory: %s", err)
+		log.Fatalf("Unable to derive ENC key: %s", err)
 	}
-	log.Infof("Backup directory: %s", backupDir)
+	macKey, err := internal.DeriveKey(passphrase)
+	if err != nil {
+		log.Fatalf("Unable to derive MAC key: %s", err)
+	}
 
+	// Create backup directory
+	log.Println("Creating backup directory...")
+	backupDir, err := internal.CreateBackupDirectory()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// TODO: Handle Decrypting (and maybe restoring the backup)
+
+	// Iterate over directories and encrypt/backup
 	var start = time.Now()
-	var bytesRead = int64(0)
+	var bytesRead = int64(1)
 	for _, dir := range config.Directories {
 		tokens := strings.Split(dir, "/")
 		targetDir := fmt.Sprintf("%s/%s", backupDir, tokens[len(tokens)-1])
@@ -86,7 +92,8 @@ func main() {
 			log.Errorf("Unable to create backup directory: %s", err)
 			continue
 		}
-		read, err := internal.CopyDirectory(dir, targetDir, encKey, encKey)
+		log.Infof("Backing up: %s ...", dir)
+		read, err := internal.CopyDirectory(dir, targetDir, encKey, macKey)
 		if err != nil {
 			log.Errorf("Failed to backup %s: %s", dir, err)
 			continue
@@ -96,12 +103,13 @@ func main() {
 
 	// TODO: Save metadata to an backup.info file to allow decryption/restore
 
-	// Log stats
-	log.Info("Backup completed")
+	// Log Statistics
 	var formattedRead = internal.ByteCountBinary(bytesRead)
-	log.WithFields(log.Fields{
+	logFields := log.Fields{
 		"Read":  internal.Formatter.Sprint(formattedRead),
 		"Speed": internal.Formatter.Sprintf("%s/s", internal.ByteCountBinary((bytesRead/time.Since(start).Milliseconds())*1000)),
 		"Time":  internal.Formatter.Sprint(time.Since(start).Truncate(time.Millisecond * 10)),
-	}).Info("Backup Statistics: ")
+	}
+	log.Info("Backup completed")
+	log.WithFields(logFields).Info("Backup Statistics: ")
 }

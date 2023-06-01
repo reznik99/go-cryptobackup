@@ -100,7 +100,7 @@ func Copy(srcFile, dstFile string, encKey []byte, macKey []byte) error {
 	log.WithFields(log.Fields{
 		"name": inStats.Name(),
 		"size": Formatter.Sprint(ByteCountBinary(inStats.Size())),
-	}).Info("- Copied file")
+	}).Debug("- Copied file")
 
 	return nil
 }
