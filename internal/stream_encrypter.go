@@ -33,6 +33,14 @@ func NewStreamEncrypter(encKey, macKey []byte, plainText io.Reader) (*StreamEncr
 	}, nil
 }
 
+// StreamMeta is metadata about an encrypted stream
+type StreamMeta struct {
+	// IV is the initial value for the crypto function
+	IV []byte
+	// Hash is the sha256 hmac of the stream
+	Hash []byte
+}
+
 // StreamEncrypter is an encrypter for a stream of data with authentication
 type StreamEncrypter struct {
 	Source io.Reader
@@ -40,6 +48,11 @@ type StreamEncrypter struct {
 	Stream cipher.Stream
 	Mac    hash.Hash
 	IV     []byte
+}
+
+// Meta returns the encrypted stream metadata for use in decrypting. This should only be called after the stream is finished
+func (s *StreamEncrypter) Meta() StreamMeta {
+	return StreamMeta{IV: s.IV, Hash: s.Mac.Sum(nil)}
 }
 
 // Read encrypts the bytes of the inner reader and places them into p

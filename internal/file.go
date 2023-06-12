@@ -22,87 +22,99 @@ func CopyDirectory(scrDir, dest string, encKey []byte, macKey []byte) (int64, er
 
 		fileInfo, err := os.Stat(sourcePath)
 		if err != nil {
-			return totalRead, err
+			log.Error(err)
+			continue
 		}
 
 		stat, ok := fileInfo.Sys().(*syscall.Stat_t)
 		if !ok {
-			return totalRead, fmt.Errorf("failed to get raw syscall.Stat_t data for '%s'", sourcePath)
+			log.Error(fmt.Errorf("failed to get raw syscall.Stat_t data for '%s'", sourcePath))
+			continue
 		}
 
 		switch fileInfo.Mode() & os.ModeType {
 		case os.ModeDir:
 			if err := CreateIfNotExists(destPath, 0755); err != nil {
-				return totalRead, err
+				log.Error(err)
+				continue
 			}
 			read, err := CopyDirectory(sourcePath, destPath, encKey, macKey)
 			if err != nil {
-				return totalRead + read, err
+				log.Error(err)
+				continue
 			}
 			totalRead += read
 		case os.ModeSymlink:
 			if err := CopySymLink(sourcePath, destPath); err != nil {
-				return totalRead, err
+				log.Error(err)
+				continue
 			}
 		default:
-			if err := Copy(sourcePath, destPath, encKey, macKey); err != nil {
-				return totalRead, err
+			_, err := Copy(sourcePath, destPath, encKey, macKey)
+			if err != nil {
+				log.Error(err)
+				continue
 			}
 			totalRead += fileInfo.Size()
 		}
 
 		if err := os.Lchown(destPath, int(stat.Uid), int(stat.Gid)); err != nil {
-			return totalRead, err
+			log.Error(err)
+			continue
 		}
 
 		fInfo, err := entry.Info()
 		if err != nil {
-			return totalRead, err
+			log.Error(err)
+			continue
 		}
 
 		isSymlink := fInfo.Mode()&os.ModeSymlink != 0
 		if !isSymlink {
 			if err := os.Chmod(destPath, fInfo.Mode()); err != nil {
-				return totalRead, err
+				log.Error(err)
+				continue
 			}
 		}
 	}
 	return totalRead, nil
 }
 
-func Copy(srcFile, dstFile string, encKey []byte, macKey []byte) error {
+func Copy(srcFile, dstFile string, encKey []byte, macKey []byte) (*StreamMeta, error) {
 	out, err := os.Create(dstFile)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer out.Close()
 
 	in, err := os.Open(srcFile)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer in.Close()
 
 	inEncrypt, err := NewStreamEncrypter(encKey, macKey, in)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	_, err = io.Copy(out, inEncrypt)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	inStats, err := in.Stat()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	log.WithFields(log.Fields{
 		"name": inStats.Name(),
 		"size": Formatter.Sprint(ByteCountBinary(inStats.Size())),
 	}).Debug("- Copied file")
 
-	return nil
+	meta := inEncrypt.Meta()
+
+	return &meta, nil
 }
 
 func Exists(filePath string) bool {
