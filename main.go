@@ -5,7 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
+	"path/filepath"
 	"time"
 
 	"github.com/reznik99/go-cryptobackup/internal"
@@ -13,7 +13,8 @@ import (
 )
 
 type Config struct {
-	Directories []string `json:"directories"`
+	Directories     []string `json:"directories"`
+	BackupDirectory string   `json:"backup_directory"`
 }
 
 func ParseConfig(configPath string) Config {
@@ -51,18 +52,18 @@ func main() {
 	log.SetOutput(os.Stdout)
 
 	// Parse Flags and Configuration
-	log.Println("Parsing CLI flags...")
+	log.Info("📝 Parsing CLI flags...")
 	var configPath, passphrase, verbose = ParseFlags()
-	log.Println("Parsing config...")
+	log.Info("📝 Parsing config...")
 	var config = ParseConfig(configPath)
 
 	if verbose {
 		log.SetLevel(log.DebugLevel)
-		log.Debug("Verbose logging enbabled...")
+		log.Debug("📝 Verbose logging enbabled...")
 	}
 
 	// Derive encryption keys
-	log.Println("Deriving encryption keys...")
+	log.Info("🔑 Deriving encryption keys...")
 	encKey, err := internal.DeriveKey(passphrase)
 	if err != nil {
 		log.Fatalf("Unable to derive ENC key: %s", err)
@@ -73,10 +74,13 @@ func main() {
 	}
 
 	// Create backup directory
-	log.Println("Creating backup directory...")
-	backupDir, err := internal.CreateBackupDirectory()
+	log.Printf("📂 Creating backup directory...")
+	var backupDir = filepath.Join(config.BackupDirectory, time.Now().Format("2006-01-02T15:04:05-0700"))
+	err = internal.CreateIfNotExists(backupDir, 0755)
 	if err != nil {
-		log.Fatal(err)
+		if err != nil {
+			log.Fatal(fmt.Errorf("unable to create general backup directory: %s", err))
+		}
 	}
 
 	// TODO: Handle Decrypting (and maybe restoring the backup)
@@ -84,18 +88,18 @@ func main() {
 	// Iterate over directories and encrypt/backup
 	var start = time.Now()
 	var bytesRead = int64(1)
-	for _, dir := range config.Directories {
-		tokens := strings.Split(dir, "/")
-		targetDir := fmt.Sprintf("%s/%s", backupDir, tokens[len(tokens)-1])
+	for _, sourceDir := range config.Directories {
+		targetDir := filepath.Join(backupDir, filepath.Base(sourceDir))
 		err = internal.CreateIfNotExists(targetDir, 0755)
 		if err != nil {
 			log.Errorf("Unable to create backup directory: %s", err)
 			continue
 		}
-		log.Infof("Backing up: %s ...", dir)
-		read, err := internal.CopyDirectory(dir, targetDir, encKey, macKey)
+
+		log.WithField("Source", sourceDir).Infof("🔐 Backing up")
+		read, err := internal.CopyDirectory(sourceDir, targetDir, encKey, macKey)
 		if err != nil {
-			log.Errorf("Failed to backup %s: %s", dir, err)
+			log.Errorf("Failed to backup %s: %s", sourceDir, err)
 			continue
 		}
 		bytesRead += read
@@ -105,11 +109,11 @@ func main() {
 
 	// Log Statistics
 	var formattedRead = internal.ByteCountBinary(bytesRead)
-	logFields := log.Fields{
+	statistics := log.Fields{
 		"Read":  internal.Formatter.Sprint(formattedRead),
 		"Speed": internal.Formatter.Sprintf("%s/s", internal.ByteCountBinary((bytesRead/time.Since(start).Milliseconds())*1000)),
 		"Time":  internal.Formatter.Sprint(time.Since(start).Truncate(time.Millisecond * 10)),
 	}
-	log.Info("Backup completed")
-	log.WithFields(logFields).Info("Backup Statistics: ")
+	log.WithField("Dir", backupDir).Info("✅ Encrypt/Backup completed")
+	log.WithFields(statistics).Info("💡 Backup Statistics")
 }
