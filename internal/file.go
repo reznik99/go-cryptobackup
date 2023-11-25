@@ -2,7 +2,6 @@ package internal
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -10,7 +9,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func CopyDirectory(scrDir, dest string, encKey []byte, macKey []byte) (int64, error) {
+func CopyDirectory(scrDir, dest string, encrypter *Encrypter) (int64, error) {
 	var totalRead = int64(0)
 	entries, err := os.ReadDir(scrDir)
 	if err != nil {
@@ -32,7 +31,7 @@ func CopyDirectory(scrDir, dest string, encKey []byte, macKey []byte) (int64, er
 				log.Error(err)
 				continue
 			}
-			read, err := CopyDirectory(sourcePath, destPath, encKey, macKey)
+			read, err := CopyDirectory(sourcePath, destPath, encrypter)
 			if err != nil {
 				log.Error(err)
 				continue
@@ -44,8 +43,7 @@ func CopyDirectory(scrDir, dest string, encKey []byte, macKey []byte) (int64, er
 				continue
 			}
 		default:
-			_, err := Copy(sourcePath, destPath, encKey, macKey)
-			if err != nil {
+			if err := Copy(sourcePath, destPath, encrypter); err != nil {
 				log.Error(err)
 				continue
 			}
@@ -81,41 +79,34 @@ func CopyDirectory(scrDir, dest string, encKey []byte, macKey []byte) (int64, er
 	return totalRead, nil
 }
 
-func Copy(srcFile, dstFile string, encKey []byte, macKey []byte) (*StreamMeta, error) {
+func Copy(srcFile, dstFile string, encrypter *Encrypter) error {
 	out, err := os.Create(dstFile)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer out.Close()
 
 	in, err := os.Open(srcFile)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer in.Close()
 
-	inEncrypt, err := NewStreamEncrypter(encKey, macKey, in)
+	// Encrypt or Decrypt file
+	err = encrypter.ProcessFile(in, out)
 	if err != nil {
-		return nil, err
-	}
-
-	_, err = io.Copy(out, inEncrypt)
-	if err != nil {
-		return nil, err
+		return err
 	}
 
 	inStats, err := in.Stat()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	log.WithFields(log.Fields{
 		"name": inStats.Name(),
-		"size": Formatter.Sprint(ByteCountBinary(inStats.Size())),
-	}).Debug("- Copied file")
+	}).Debugf("- Copied file %q", Formatter.Sprint(ByteCountBinary(inStats.Size())))
 
-	meta := inEncrypt.Meta()
-
-	return &meta, nil
+	return nil
 }
 
 func Exists(filePath string) bool {

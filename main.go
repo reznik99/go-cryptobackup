@@ -15,6 +15,7 @@ import (
 type Config struct {
 	Directories     []string `json:"directories"`
 	BackupDirectory string   `json:"backup_directory"`
+	DateBackups     bool     `json:"date_backups"`
 }
 
 func ParseConfig(configPath string) Config {
@@ -32,9 +33,10 @@ func ParseConfig(configPath string) Config {
 	return config
 }
 
-func ParseFlags() (string, string, bool) {
+func ParseFlags() (string, string, bool, bool) {
 	var configPath = flag.String("conf", "", "Absolute path to config file for backup/restore instructions")
 	var passphrase = flag.String("pass", "", "Passphrase to encrypt backups")
+	var decrypt = flag.Bool("restore", false, "Passphrase to encrypt backups")
 	var verbose = flag.Bool("v", false, "Passphrase to encrypt backups")
 	flag.Parse()
 
@@ -43,7 +45,7 @@ func ParseFlags() (string, string, bool) {
 		os.Exit(1)
 	}
 
-	return *configPath, *passphrase, *verbose
+	return *configPath, *passphrase, *verbose, *decrypt
 }
 
 func main() {
@@ -53,7 +55,7 @@ func main() {
 
 	// Parse Flags and Configuration
 	log.Info("📝 Parsing CLI flags...")
-	var configPath, passphrase, verbose = ParseFlags()
+	var configPath, passphrase, verbose, decrypt = ParseFlags()
 	log.Info("📝 Parsing config...")
 	var config = ParseConfig(configPath)
 
@@ -62,29 +64,52 @@ func main() {
 		log.Debug("📝 Verbose logging enbabled...")
 	}
 
+	if decrypt {
+		DoDecrypt(config, passphrase)
+	} else {
+		DoEncrypt(config, passphrase)
+	}
+
+}
+
+func DoEncrypt(config Config, passphrase string) {
 	// Derive encryption keys
 	log.Info("🔑 Deriving encryption keys...")
-	encKey, err := internal.DeriveKey(passphrase)
+	encKey, salt, err := internal.DeriveKey(passphrase, nil, 32)
 	if err != nil {
 		log.Fatalf("Unable to derive ENC key: %s", err)
 	}
-	macKey, err := internal.DeriveKey(passphrase)
+
+	encrypter, err := internal.NewEncrypter(encKey, internal.Encrypt)
 	if err != nil {
-		log.Fatalf("Unable to derive MAC key: %s", err)
+		log.Fatal(err)
+	}
+
+	infoFile, err := internal.MarshalInfoFile(&internal.InfoFile{Salt: salt})
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	// Create backup directory
 	log.Printf("📂 Creating backup directory...")
-	backupDir := filepath.Join(config.BackupDirectory, time.Now().Format("2006-01-02T15:04:05-0700"))
+	backupDir := config.BackupDirectory
+	if config.DateBackups {
+		backupDir = filepath.Join(config.BackupDirectory, fmt.Sprintf("%d", time.Now().UnixMilli()))
+	}
 	if err := internal.CreateIfNotExists(backupDir, 0755); err != nil {
 		log.Fatal(fmt.Errorf("unable to create general backup directory: %s", err))
 	}
 
-	// TODO: Handle Decrypting (and maybe restoring the backup)
+	file, err := os.Create(filepath.Join(backupDir, internal.ToolInfoFile))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
 
-	// Iterate over directories and encrypt/backup
+	file.Write(infoFile)
+
+	var bytesRead = int64(0)
 	var start = time.Now()
-	var bytesRead = int64(1)
 	for _, sourceDir := range config.Directories {
 		targetDir := filepath.Join(backupDir, filepath.Base(sourceDir))
 		if err := internal.CreateIfNotExists(targetDir, 0755); err != nil {
@@ -93,15 +118,13 @@ func main() {
 		}
 
 		log.WithField("Source", sourceDir).Infof("🔐 Backing up")
-		read, err := internal.CopyDirectory(sourceDir, targetDir, encKey, macKey)
+		read, err := internal.CopyDirectory(sourceDir, targetDir, encrypter)
 		if err != nil {
 			log.Errorf("Failed to backup %q: %s", sourceDir, err)
 			continue
 		}
 		bytesRead += read
 	}
-
-	// TODO: Save metadata to an backup.info file to allow decryption/restore
 
 	// Log Statistics
 	bytesPerSeconds := (bytesRead / time.Since(start).Milliseconds()) * 1000
@@ -112,4 +135,65 @@ func main() {
 	}
 	log.WithField("Dir", backupDir).Info("✅ Encrypt/Backup completed")
 	log.WithFields(statistics).Info("💡 Backup Statistics")
+	log.Infof("Key: %X", encKey)
+}
+
+func DoDecrypt(config Config, passphrase string) {
+	// Get salt for KDF from backup info file
+	backupInfo, err := internal.ParseInfoFile(config.BackupDirectory)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Derive encryption keys
+	log.Info("🔑 Deriving encryption keys...")
+	encKey, _, err := internal.DeriveKey(passphrase, backupInfo.Salt, 32)
+	if err != nil {
+		log.Fatalf("Unable to derive ENC key: %s", err)
+	}
+
+	encrypter, err := internal.NewEncrypter(encKey, internal.Decrypt)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	entries, err := os.ReadDir(config.BackupDirectory)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	restoreDir := filepath.Join(filepath.Dir(config.BackupDirectory), "bktool-restored")
+
+	var bytesRead = int64(0)
+	var start = time.Now()
+	for _, entry := range entries {
+		if entry.Name() == internal.ToolInfoFile {
+			continue
+		}
+		sourceDir := filepath.Join(config.BackupDirectory, entry.Name())
+		targetDir := filepath.Join(restoreDir, entry.Name())
+		if err := internal.CreateIfNotExists(targetDir, 0755); err != nil {
+			log.Errorf("Unable to create backup directory %q: %s", targetDir, err)
+			continue
+		}
+
+		log.WithField("Source", sourceDir).Infof("🔐 Restoring")
+		read, err := internal.CopyDirectory(sourceDir, targetDir, encrypter)
+		if err != nil {
+			log.Errorf("Failed to backup %q: %s", sourceDir, err)
+			continue
+		}
+		bytesRead += read
+	}
+
+	// Log Statistics
+	bytesPerSeconds := (bytesRead / time.Since(start).Milliseconds()) * 1000
+	statistics := log.Fields{
+		"Read":  internal.Formatter.Sprint(internal.ByteCountBinary(bytesRead)),
+		"Speed": internal.Formatter.Sprintf("%s/s", internal.ByteCountBinary(bytesPerSeconds)),
+		"Time":  internal.Formatter.Sprint(time.Since(start).Truncate(time.Millisecond * 10)),
+	}
+	log.WithField("Dir", restoreDir).Info("✅ Decrypt/Restore completed")
+	log.WithFields(statistics).Info("💡 Backup Statistics")
+	log.Infof("Key: %X", encKey)
 }
