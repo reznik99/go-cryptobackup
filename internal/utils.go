@@ -9,6 +9,7 @@ import (
 
 var Formatter = message.NewPrinter(language.English)
 
+// ByteCountBinary returns stringified Bytesize such as '1.2 KiB' or '2.5 MiB'
 func ByteCountBinary(b int64) string {
 	const unit = 1024
 	if b < unit {

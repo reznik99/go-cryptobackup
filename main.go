@@ -75,12 +75,9 @@ func main() {
 
 	// Create backup directory
 	log.Printf("📂 Creating backup directory...")
-	var backupDir = filepath.Join(config.BackupDirectory, time.Now().Format("2006-01-02T15:04:05-0700"))
-	err = internal.CreateIfNotExists(backupDir, 0755)
-	if err != nil {
-		if err != nil {
-			log.Fatal(fmt.Errorf("unable to create general backup directory: %s", err))
-		}
+	backupDir := filepath.Join(config.BackupDirectory, time.Now().Format("2006-01-02T15:04:05-0700"))
+	if err := internal.CreateIfNotExists(backupDir, 0755); err != nil {
+		log.Fatal(fmt.Errorf("unable to create general backup directory: %s", err))
 	}
 
 	// TODO: Handle Decrypting (and maybe restoring the backup)
@@ -90,16 +87,15 @@ func main() {
 	var bytesRead = int64(1)
 	for _, sourceDir := range config.Directories {
 		targetDir := filepath.Join(backupDir, filepath.Base(sourceDir))
-		err = internal.CreateIfNotExists(targetDir, 0755)
-		if err != nil {
-			log.Errorf("Unable to create backup directory: %s", err)
+		if err := internal.CreateIfNotExists(targetDir, 0755); err != nil {
+			log.Errorf("Unable to create backup directory %q: %s", targetDir, err)
 			continue
 		}
 
 		log.WithField("Source", sourceDir).Infof("🔐 Backing up")
 		read, err := internal.CopyDirectory(sourceDir, targetDir, encKey, macKey)
 		if err != nil {
-			log.Errorf("Failed to backup %s: %s", sourceDir, err)
+			log.Errorf("Failed to backup %q: %s", sourceDir, err)
 			continue
 		}
 		bytesRead += read
@@ -108,10 +104,10 @@ func main() {
 	// TODO: Save metadata to an backup.info file to allow decryption/restore
 
 	// Log Statistics
-	var formattedRead = internal.ByteCountBinary(bytesRead)
+	bytesPerSeconds := (bytesRead / time.Since(start).Milliseconds()) * 1000
 	statistics := log.Fields{
-		"Read":  internal.Formatter.Sprint(formattedRead),
-		"Speed": internal.Formatter.Sprintf("%s/s", internal.ByteCountBinary((bytesRead/time.Since(start).Milliseconds())*1000)),
+		"Read":  internal.Formatter.Sprint(internal.ByteCountBinary(bytesRead)),
+		"Speed": internal.Formatter.Sprintf("%s/s", internal.ByteCountBinary(bytesPerSeconds)),
 		"Time":  internal.Formatter.Sprint(time.Since(start).Truncate(time.Millisecond * 10)),
 	}
 	log.WithField("Dir", backupDir).Info("✅ Encrypt/Backup completed")

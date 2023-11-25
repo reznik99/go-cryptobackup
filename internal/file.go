@@ -26,12 +26,6 @@ func CopyDirectory(scrDir, dest string, encKey []byte, macKey []byte) (int64, er
 			continue
 		}
 
-		stat, ok := fileInfo.Sys().(*syscall.Stat_t)
-		if !ok {
-			log.Error(fmt.Errorf("failed to get raw syscall.Stat_t data for '%s'", sourcePath))
-			continue
-		}
-
 		switch fileInfo.Mode() & os.ModeType {
 		case os.ModeDir:
 			if err := CreateIfNotExists(destPath, 0755); err != nil {
@@ -58,11 +52,18 @@ func CopyDirectory(scrDir, dest string, encKey []byte, macKey []byte) (int64, er
 			totalRead += fileInfo.Size()
 		}
 
+		stat, ok := fileInfo.Sys().(*syscall.Stat_t)
+		if !ok {
+			log.Error(fmt.Errorf("failed to get raw syscall.Stat_t data for %q", sourcePath))
+			continue
+		}
+		// Copy File ownership
 		if err := os.Lchown(destPath, int(stat.Uid), int(stat.Gid)); err != nil {
 			log.Error(err)
 			continue
 		}
 
+		// Copy File permissions if not a symlink
 		fInfo, err := entry.Info()
 		if err != nil {
 			log.Error(err)
@@ -131,7 +132,7 @@ func CreateIfNotExists(dir string, perm os.FileMode) error {
 	}
 
 	if err := os.MkdirAll(dir, perm); err != nil {
-		return fmt.Errorf("failed to create directory: '%s', error: '%s'", dir, err.Error())
+		return fmt.Errorf("failed to create directory %q: %s", dir, err)
 	}
 
 	return nil
