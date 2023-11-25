@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	argonTime    = 3
-	argonMemory  = 32 * 1024
-	argonThreads = 4
+	argonTime    = 3         // 3 Standard default
+	argonMemory  = 64 * 1024 // 64 KB memory size
+	argonThreads = 4         // 4 threads
+	argonSaltLen = 128       // 128 bit salt length
 )
 const (
 	Encrypt = iota
@@ -24,7 +25,7 @@ const (
 func DeriveKey(passphrase string, salt []byte, length uint32) ([]byte, []byte, error) {
 	// Generate Salt if not specified
 	if len(salt) == 0 {
-		salt = make([]byte, 64)
+		salt = make([]byte, argonSaltLen)
 		_, err := io.ReadFull(rand.Reader, salt)
 		if err != nil {
 			return nil, nil, err
