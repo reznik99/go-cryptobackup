@@ -79,7 +79,6 @@ func (enc *Encrypter) EncryptFile(in, out *os.File) error {
 	if _, err := rand.Read(nonce); err != nil {
 		return err
 	}
-	nonce = []byte("This is a IV")
 	ciphertext := enc.Cipher.Seal(nil, nonce, plaintext, nil)
 
 	// Prepend IV
