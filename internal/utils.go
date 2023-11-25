@@ -32,7 +32,7 @@ func ByteCountBinary(b int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
-func ParseInfoFile(path string) (*InfoFile, error) {
+func ReadInfoFile(path string) (*InfoFile, error) {
 	infoFile, err := os.ReadFile(filepath.Join(path, ToolInfoFile))
 	if err != nil {
 		return nil, err
@@ -47,6 +47,19 @@ func ParseInfoFile(path string) (*InfoFile, error) {
 	return backupInfo, nil
 }
 
-func MarshalInfoFile(info *InfoFile) ([]byte, error) {
-	return json.Marshal(info)
+func WriteInfoFile(info *InfoFile, path string) error {
+	infoFile, err := json.Marshal(info)
+	if err != nil {
+		return err
+	}
+
+	file, err := os.Create(filepath.Join(path, ToolInfoFile))
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	file.Write(infoFile)
+
+	return nil
 }

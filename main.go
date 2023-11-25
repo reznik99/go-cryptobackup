@@ -85,11 +85,6 @@ func DoEncrypt(config Config, passphrase string) {
 		log.Fatal(err)
 	}
 
-	infoFile, err := internal.MarshalInfoFile(&internal.InfoFile{Salt: salt})
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	// Create backup directory
 	log.Printf("📂 Creating backup directory...")
 	backupDir := config.BackupDirectory
@@ -100,13 +95,11 @@ func DoEncrypt(config Config, passphrase string) {
 		log.Fatal(fmt.Errorf("unable to create general backup directory: %s", err))
 	}
 
-	file, err := os.Create(filepath.Join(backupDir, internal.ToolInfoFile))
+	// Write info file
+	err = internal.WriteInfoFile(&internal.InfoFile{Salt: salt}, backupDir)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer file.Close()
-
-	file.Write(infoFile)
 
 	var bytesRead = int64(0)
 	var start = time.Now()
@@ -140,7 +133,7 @@ func DoEncrypt(config Config, passphrase string) {
 
 func DoDecrypt(config Config, passphrase string) {
 	// Get salt for KDF from backup info file
-	backupInfo, err := internal.ParseInfoFile(config.BackupDirectory)
+	backupInfo, err := internal.ReadInfoFile(config.BackupDirectory)
 	if err != nil {
 		log.Fatal(err)
 	}
