@@ -32,6 +32,7 @@ func ByteCountBinary(b int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
+// Reads the json file at path into an Info struct
 func ReadInfoFile(path string) (*InfoFile, error) {
 	infoFile, err := os.ReadFile(filepath.Join(path, ToolInfoFile))
 	if err != nil {
@@ -47,8 +48,9 @@ func ReadInfoFile(path string) (*InfoFile, error) {
 	return backupInfo, nil
 }
 
+// Writes the Info struct data into a json file at path
 func WriteInfoFile(info *InfoFile, path string) error {
-	infoFile, err := json.Marshal(info)
+	infoFile, err := json.MarshalIndent(info, "", "\t")
 	if err != nil {
 		return err
 	}

@@ -12,6 +12,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+const RestoreFolderName = "bktool-restored"
+
 type Config struct {
 	Directories     []string `json:"directories"`
 	BackupDirectory string   `json:"backup_directory"`
@@ -69,9 +71,10 @@ func main() {
 	} else {
 		DoEncrypt(config, passphrase)
 	}
-
 }
 
+// DoEncrypt iterates over the target directories in config. Derives encryption key and
+// recursively encrypts everything into backup folder
 func DoEncrypt(config Config, passphrase string) {
 	// Derive encryption keys
 	log.Info("🔑 Deriving encryption keys...")
@@ -128,9 +131,10 @@ func DoEncrypt(config Config, passphrase string) {
 	}
 	log.WithField("Dir", backupDir).Info("✅ Encrypt/Backup completed")
 	log.WithFields(statistics).Info("💡 Backup Statistics")
-	log.Infof("Key: %X", encKey)
 }
 
+// DoDecrypt iterates over backup folder, parses info file, re-derives encryption keys and
+// recursively decrypt everything into the Restore folder.
 func DoDecrypt(config Config, passphrase string) {
 	// Get salt for KDF from backup info file
 	backupInfo, err := internal.ReadInfoFile(config.BackupDirectory)
@@ -155,7 +159,7 @@ func DoDecrypt(config Config, passphrase string) {
 		log.Fatal(err)
 	}
 
-	restoreDir := filepath.Join(filepath.Dir(config.BackupDirectory), "bktool-restored")
+	restoreDir := filepath.Join(filepath.Dir(config.BackupDirectory), RestoreFolderName)
 
 	var bytesRead = int64(0)
 	var start = time.Now()
@@ -166,14 +170,14 @@ func DoDecrypt(config Config, passphrase string) {
 		sourceDir := filepath.Join(config.BackupDirectory, entry.Name())
 		targetDir := filepath.Join(restoreDir, entry.Name())
 		if err := internal.CreateIfNotExists(targetDir, 0755); err != nil {
-			log.Errorf("Unable to create backup directory %q: %s", targetDir, err)
+			log.Errorf("Unable to create directory %q: %s", targetDir, err)
 			continue
 		}
 
-		log.WithField("Source", sourceDir).Infof("🔐 Restoring")
+		log.WithField("Source", sourceDir).Infof("🔓 Restoring")
 		read, err := internal.CopyDirectory(sourceDir, targetDir, encrypter)
 		if err != nil {
-			log.Errorf("Failed to backup %q: %s", sourceDir, err)
+			log.Errorf("Failed to decrypt %q: %s", sourceDir, err)
 			continue
 		}
 		bytesRead += read
@@ -188,5 +192,4 @@ func DoDecrypt(config Config, passphrase string) {
 	}
 	log.WithField("Dir", restoreDir).Info("✅ Decrypt/Restore completed")
 	log.WithFields(statistics).Info("💡 Backup Statistics")
-	log.Infof("Key: %X", encKey)
 }
